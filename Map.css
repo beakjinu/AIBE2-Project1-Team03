@@ -1,0 +1,96 @@
+body{
+  overflow-x: hidden;
+}
+#map-container {
+  margin-left: 200px;
+  width: 100%;
+  max-width: 10000px;
+  margin-left: 200px;
+  margin-top: 250px;
+}
+svg path:hover {
+  fill: orange;
+  cursor: pointer;
+}
+.side-panel {
+    position: absolute;
+    top: 50px;
+    right: -50%;  /* 처음엔 화면 바깥에 위치. */
+    width: 50%;   
+    height: 90%;
+    background-color: rgb(200, 241, 104);
+    transition: right 0.5s ease-in-out;
+    display: flex;
+    flex-direction: column;
+    border-radius: 5% 0% 0% 5% ;
+  }
+  .side-panel.open {
+    right: 0%; /* 화면에 등장. */
+  }
+  .info-wrapper {/*contry_info와 weather포함하는 div*/
+    height: 10%;
+    display: flex;
+    gap: 0px;
+  }
+  #contry_info{
+    background-color: aqua;
+    width: 50%;
+    height: 100%;
+    border-radius: 5% 0% 0% 0% ;
+    display: flex;
+  }
+  #contry_info p{
+    font-size : 20px;
+    margin-left: 100px;
+  }
+  #weather{
+    background-color: rgb(32, 226, 90);
+    width: 50%;
+    height: 100%;
+    position: relative;
+  }
+  #weather p{
+    margin-left: 30px ;
+  }
+  #tourist {/*관광지*/
+    height: 80%;
+    background-color: #dd8787;
+    padding: 10px;
+  }
+  .under-wrapper {/*패널 하단부*/
+    height: 10%;
+    display: flex;
+    gap: 0px;
+  }
+  #Budget{
+    background-color: aqua;
+    width: 50%;
+    height: 100%;
+    border-radius: 0% 0% 0% 5% ;
+  }
+  #review{
+    padding: 0;
+    margin-left: 120px;
+  }
+  #side-menu {
+    flex: 1; 
+    padding: 10px;
+    border: 0px solid #ddd;
+  }
+  #side-close {
+    position: absolute;
+    top: 10px;
+    right: 20px;
+    width: 30px;
+    height: 30px;
+    background-color: rgb(32, 226, 90);
+    color: black;
+    font-size: 40px;
+    font-weight: bold;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    z-index: 999;
+    line-height: 30px;
+    text-align: center;
+  }
