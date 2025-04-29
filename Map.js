@@ -1,192 +1,338 @@
-//마지막에 클릭된 국가 id 저장
+// --- 전역 변수 및 데이터 로딩 ---
 let lastSelectedId = null;
-//입력된 금액
-let input_money = 0;
-//입력 여행 일수
-let input_days = 10;
+let input_min_budget = 1000;
+let input_max_budget = 1500;
+let input_days = 7;
+let lasebudget = 0;
 
-//국가코드 => 수도 데이터
+let touristData = {};
+let countryBudgetData = {};
 let capitalData = {};
-fetch('assets/capital.json')
-  .then(response => response.json())
-  .then(data => {
-    capitalData = data;
-  })
-  .catch(err => console.error('수도 데이터 불러오기 실패:', err));
+const contry_id = [];
 
+const apiKey = 'Open trip api key';
 
-//지도 클릭 이벤트
-fetch('assets/world-map.svg')
-  .then(res => res.text())
-  .then(svgText => {
-    const container = document.getElementById('map-container');
-    container.innerHTML = svgText;
+// 국가 중심 좌표 (필요시 확장)
+const countryCenters = {
+  KR: { name: "seoul", lat: 37.5665, lon: 126.9780 },
+  JP: { name: "tokyo", lat: 35.6895, lon: 139.6917 },
+  BZ: { name: "belmopan", lat: 17.2514, lon: -88.7669 },
+  // ... 추가
+};
 
-    const svg = container.querySelector('svg');
-    const paths = svg.querySelectorAll('path');
+// --- 데이터 로드 ---
+Promise.all([
+  fetch('assets/tourist.json').then(res => res.json()),
+  fetch('assets/Budget.json').then(res => res.json()),
+  fetch('assets/capital.json').then(res => res.json()),
+  fetch('assets/world-map.svg').then(res => res.text())
+]).then(([tourist, budget, capital, svgText]) => {
+  touristData = tourist;
+  countryBudgetData = budget;
+  capitalData = capital;
+  document.getElementById('map-container').innerHTML = svgText;
+  setupMapClickEvents();
+  highlightCountriesByBudget(input_min_budget, input_max_budget, input_days);
+}).catch(err => {
+  console.error('데이터 로드 실패:', err);
+});
 
-    paths.forEach(path => {
-      path.addEventListener('click', () => {
-        const parentGroup = path.closest('g');
-        const groupId = parentGroup ? parentGroup.id : 'no-group-id';
-        
-        lastSelectedId = groupId;
-
-        close_slide(groupId);
-        open_slide(groupId);
-        Add_Weather(groupId);
-        display_budget(groupId); // 예산 정보 표시
-
-        // 중복된 id가 없을 때만 배열에 추가
-        if (!contry_id.includes(groupId)) {
-          contry_id.push(groupId);
-        }
-
-      });
+// --- 지도 클릭 이벤트 연결 ---
+function setupMapClickEvents() {
+  const svg = document.querySelector('#map-container svg');
+  if (!svg) return;
+  const paths = svg.querySelectorAll('path');
+  paths.forEach(path => {
+    path.addEventListener('click', () => {
+      const parentGroup = path.closest('g');
+      const groupId = parentGroup ? parentGroup.id : null;
+      if (!groupId) return;
+      lastSelectedId = groupId.toUpperCase();
+      close_slide();
+      open_slide(groupId);
+      Add_Weather(groupId);
+      display_budget(groupId);
+      renderTouristCardsByCountry(groupId);
+      if (!contry_id.includes(groupId)) contry_id.push(groupId);
     });
   });
+}
 
+// --- 사이드패널 열기/닫기 ---
+function open_slide(id) {
+  const sidePanel = document.getElementById('sidePanel');
+  sidePanel.classList.add('open');
+  const selected = document.getElementById('contry_info');
+  selected.innerHTML = '';
+  const flagImg = document.createElement('img');
+  flagImg.src = `https://flagcdn.com/w80/${id.toLowerCase()}.png`;
+  flagImg.alt = `${id} flag`;
+  selected.appendChild(flagImg);
+  const countryNames = new Intl.DisplayNames(['ko'], { type: 'region' }).of(id.toUpperCase());
+  const InputName = document.createElement('p');
+  InputName.textContent = countryNames;
+  selected.appendChild(InputName);
+}
+function close_slide() {
+  const sidePanel = document.getElementById('sidePanel');
+  sidePanel.classList.remove('open');
+  document.getElementById('contry_info').innerHTML = '';
+  remove_weather();
+  document.getElementById('tourist').innerHTML = '';
+  document.getElementById('Budget').innerHTML = '';
+}
+document.getElementById('side-close').addEventListener('click', () => close_slide());
 
-//사이드패널 열기, 국기, 국가 이름  
-  function open_slide(id){
-    const sidePanel = document.getElementById('sidePanel');
-     sidePanel.classList.toggle('open');
-    const selected = document.getElementById('contry_info');
-      selected.innerHTML = '';
-     //사이드 패널 상단에 국기 넣기
-    const flagImg = document.createElement('img');
-     flagImg.src = `https://flagcdn.com/w80/${id.toLowerCase()}.png`;
-     flagImg.alt = `${id} flag`;
-     flagImg.style.width = '40%';
-     flagImg.style.height = '100%';
-     flagImg.style.marginTop = '0px';
-     flagImg.style.borderRadius = '5% 0% 0% 0%';
-     selected.appendChild(flagImg);
-     //국기 옆에 나라 이름 작성
-     const upperId = id.toUpperCase(); //=> svg에서 제공하는 id가 (영어)소문자라서 대문자로 바꿈
-     console.log(upperId);
-     const countryNames = new Intl.DisplayNames(['ko'], { type: 'region' }).of(`${upperId}`);//국가id를 한국어로 변환
-     const InputName = document.createElement('p');
-     InputName.textContent = countryNames;
-     selected.appendChild(InputName);
+// --- 날씨 표시 ---
+function Add_Weather(id){
+  const apiKey = "날씨 api key";
+  const countryCode = id.toUpperCase();
+  const city = capitalData[countryCode];
+
+  if(!city){
+    document.getElementById('weather').innerHTML = '<p>날씨 정보를 찾을 수 없습니다.</p>';
+    return;
   }
-//사이드패널 닫기
-  function close_slide(id){
-    //사이드패널 우측(화면 밖 이동)
-    const sidePanel = document.getElementById('sidePanel');
-        sidePanel.classList.remove('open');
-    //contry_info 제거
-    const selected = document.getElementById('contry_info');
-    selected.innerHTML = '';
-  }
-  //닫기버튼 동작
-  document.addEventListener('DOMContentLoaded',()=>{
-    document.getElementById('side-close').addEventListener('click', ()=>{
-      if(lastSelectedId){
-      close_slide(lastSelectedId);
-      }
-    });
-  });
 
-  //날씨 함수 추가
-  function Add_Weather(id){
-    const apiKey = "79fc9d5f205b88928b916382beacdf68";
-    const countryCode = id.toUpperCase();
-    const city = capitalData[countryCode];
+  const url = `https://api.openweathermap.org/data/2.5/weather?q=${city},${countryCode}&appid=${apiKey}&units=metric&lang=kr`;
 
-    if(!city){
-      console.warn(`날씨 정보를 찾을 수 없습니다.`);
-      return;
-    }
-
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${city},${countryCode}&appid=${apiKey}&units=metric&lang=kr`;
-
-    fetch(url)
-      .then(response => response.json())
-      .then(data => {
-        const weather = data.weather[0].description;
-        const temp = data.main.temp;
-        const weatherBox = document.getElementById('weather');
-        weatherBox.innerHTML = `<p>날씨: ${weather}</p><p>현재온도: ${temp}°C</p>`;
-  })
-  .catch(error => console.error('날씨 불러오기 실패:', error));
-  }
-  //날씨 지우기 함수
-  function remove_weather(){
-    const weatherBox = document.getElementById('weather');
-    weatherBow.innerHTML = '';
-  }
-  /*관광지 추천 시작, 미완////////////////////////////////////////////////
-  const countryBoundingBoxes = {
-    "KR": [124.609756, 33.199379, 131.872222, 38.612789], // 대한민국
-    "US": [-125.0, 24.5, -66.9, 49.5], // 미국
-    "FR": [-5.1, 41.3, 9.6, 51.1], // 프랑스
-    "JP": [122.9385, 24.3963, 153.9866, 45.5515], // 일본
-    // 필요한 국가 추가
-  };
-  const apiKey ="5ae2e3f221c38a28845f05b6b83cb1a3c450df4a7fe5d406b3d5b077";
-  
-  const koreaBoundingBox = countryBoundingBoxes["JP"];
-  const lon_min = koreaBoundingBox[0]; // 124.609756
-  const lat_min = koreaBoundingBox[1]; // 33.199379
-  const lon_max = koreaBoundingBox[2]; // 131.872222
-  const lat_max = koreaBoundingBox[3]; // 38.612789
-  
-  // OpenTripMap API를 이용해 해당 바운딩박스 범위 내 여행지 가져오기
-  const url = `https://api.opentripmap.com/0.1/en/places/bbox?lon_min=${lon_min}&lat_min=${lat_min}&lon_max=${lon_max}&lat_max=${lat_max}&limit=10&apikey=${apiKey}`;
-  
   fetch(url)
-  .then(response => response.json())
-  .then(data => {
-    const places = data.features;
-
-    const popularKeywords = ['Tower', 'Museum', 'Park', 'Palace', 'Temple', 'Beach'];
-
-    const filteredPlaces = places.filter(place => {
-      return popularKeywords.some(keyword => place.properties.name.includes(keyword));
+    .then(response => response.json())
+    .then(data => {
+      const weather = data.weather[0].description;
+      const iconCode = data.weather[0].icon;
+      const temp = data.main.temp;
+      const iconUrl = `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
+      const weatherBox = document.getElementById('weather');
+      weatherBox.innerHTML = `
+        <div class="weather-block">
+          <div class="weather-row">
+            날씨: <img src="${iconUrl}" alt="${weather}">
+          </div>
+          <div class="weather-row">
+            현재온도: ${temp.toFixed(1)}°C
+          </div>
+        </div>
+      `;
+    })
+    .catch(error => {
+      document.getElementById('weather').innerHTML = '<p>날씨 정보를 불러올 수 없습니다.</p>';
+      console.error('날씨 불러오기 실패:', error);
     });
+}
 
-    filteredPlaces.slice(0, 10).forEach((place, index) => {
-      console.log(`${index + 1}. ${place.properties.name}`);
-      console.log(`   카테고리: ${place.properties.kinds}`);
-      console.log(`   위치: ${place.geometry.coordinates[1]}, ${place.geometry.coordinates[0]}`);
-    });
-  })
-  .catch(error => console.error('여행지 정보 가져오기 실패:', error));
-  //관광지 추천 끝/////////////////////////////////////////////////////////////////////*/
-  //예산 계산 함수 시작
-  let Budget = {};
-  fetch('assets/Budget.json')
-  .then(response => response.json())
-  .then(data => {
-    countryBudgetData = data;  // 파일 데이터를 변수에 저장
-  })
-  .catch(error => console.error('예산 데이터 불러오기 실패:', error));
 
-  // 예산 정보 표시 함수
+
+
+function remove_weather() {
+  document.getElementById('weather').innerHTML = '';
+}
+
+// --- 예산 패널 ---
 function display_budget(id) {
   const budgetBox = document.getElementById('Budget');
   const countryCode = id.toUpperCase();
 
-  // JSON에 해당 국가가 있을 경우 예산 정보를 표시
   if (countryBudgetData[countryCode]) {
     const budgetInfo = countryBudgetData[countryCode];
-    const total_accommodation = budgetInfo.accommodation*(input_days - 1);
-    const total_transport = budgetInfo.transport*input_days;
-    const total_food = budgetInfo.food*input_days;
+    const total_accommodation = Math.round(budgetInfo.accommodation * (input_days - 1));
+    const total_transport = Math.round(budgetInfo.transport * input_days);
+    const total_food = Math.round(budgetInfo.food * input_days);
     const total_budget = total_accommodation + total_food + total_transport;
+    lasebudget = total_budget;
+
     budgetBox.innerHTML = `
-      <p>${input_days}일 기준 비용 </p>
-      <p>숙박비: ${total_accommodation} $</p>
-      <p>교통비: ${total_transport} $</p>
-      <p>식비: ${total_food} $</p>
-      <p>항공권 제외 : ${total_budget} $</p>
+      <div class="budget-inline-panel">
+        <span class="budget-title">${input_days}일 예산</span>
+        <div class="budget-inline-row">
+          <div class="icon-box hotel">
+            <span class="icon"></span>
+            <span class="price">${total_accommodation.toLocaleString()} $</span>
+          </div>
+          <div class="icon-box bus">
+            <span class="icon"></span>
+            <span class="price">${total_transport.toLocaleString()} $</span>
+          </div>
+          <div class="icon-box food">
+            <span class="icon"></span>
+            <span class="price">${total_food.toLocaleString()} $</span>
+          </div>
+        </div>
+        <span class="budget-total-label">항공권 제외</span>
+        <span class="budget-total-amount">${total_budget.toLocaleString()} $</span>
+      </div>
     `;
   } else {
     budgetBox.innerHTML = `<p>예산 정보가 없습니다.</p>`;
   }
 }
-//예산 끝// 수정 예정
 
 
+// --- 예산별 국가 강조 ---
+function highlightCountriesByBudget(input_min_budget, input_max_budget, input_days) {
+  for (const countryCode in countryBudgetData) {
+    const budgetInfo = countryBudgetData[countryCode];
+    const total_accommodation = Number(budgetInfo.accommodation) * (input_days - 1);
+    const total_transport = Number(budgetInfo.transport) * input_days;
+    const total_food = Number(budgetInfo.food) * input_days;
+    const total_budget = total_accommodation + total_food + total_transport;
+    const countryElement = document.getElementById(countryCode.toLowerCase());
+    if (!countryElement) continue;
+    if (total_budget >= input_min_budget && total_budget <= input_max_budget) {
+      countryElement.style.fill = '#4CAF50';
+      countryElement.style.strokeWidth = '2px';
+    } else {
+      countryElement.style.fill = '';
+      countryElement.style.stroke = '';
+      countryElement.style.strokeWidth = '';
+    }
+  }
+}
 
+// --- 관광지 카드 렌더링 ---
+function renderTouristGrid(spots) {
+  const container = document.getElementById('tourist');
+  let html = '<div class="tourist-grid">';
+  for (let i = 0; i < 9; i++) {
+    const spot = spots[i];
+    if (spot) {
+      html += `
+        <div class="tourist-card">
+          <img src="${spot.preview ? spot.preview.source : 'https://via.placeholder.com/80'}" alt="${spot.name}" />
+          <div class="tourist-info">
+            <h4>${spot.name}</h4>
+            <p>${spot.wikipedia_extracts && spot.wikipedia_extracts.text
+                ? spot.wikipedia_extracts.text
+                : (spot.info || '')}</p>
+          </div>
+        </div>
+      `;
+    } else {
+      html += `<div class="tourist-card empty"></div>`;
+    }
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// --- OpenTripMap API로 관광지 조회 ---
+async function renderTouristCardsByCountry(countryId) {
+  const info = countryCenters[countryId.toUpperCase()];
+  if (!info) {
+    document.getElementById('tourist').innerHTML = '<p>해당 국가의 좌표 정보가 없습니다.</p>';
+    return;
+  }
+  const radius = 20000;
+  const radiusUrl = `https://api.opentripmap.com/0.1/en/places/radius?radius=${radius}&lon=${info.lon}&lat=${info.lat}&limit=9&apikey=${apiKey}`;
+  try {
+    const radiusRes = await fetch(radiusUrl);
+    const radiusData = await radiusRes.json();
+    const features = radiusData.features || [];
+    const details = await Promise.all(features.map(f =>
+      fetch(`https://api.opentripmap.com/0.1/en/places/xid/${f.properties.xid}?apikey=${apiKey}`)
+        .then(res => res.json())
+    ));
+    renderTouristGrid(details);
+  } catch (err) {
+    document.getElementById('tourist').innerHTML = '<p>관광지 정보를 불러오지 못했습니다.</p>';
+  }
+}
+
+// --- 일정 생성 버튼 ---
+document.getElementById('generate-itinerary-btn').addEventListener('click', () => {
+  openLeftSidePanel();
+  showItineraryLoading();
+  setTimeout(() => {
+    const itinerary = createDummyItinerary(lastSelectedId, input_days);
+    renderItinerary(itinerary);
+    renderItineraryMap(itinerary, lastSelectedId);
+  }, 1000);
+});
+
+// --- 왼쪽 패널 열기/닫기 ---
+function openLeftSidePanel() {
+  document.getElementById('leftSidePanel').classList.add('open');
+  document.getElementById('itinerary-list').innerHTML = '';
+  document.getElementById('left-map-container').innerHTML = '';
+}
+document.getElementById('left-side-close').addEventListener('click', () => {
+  document.getElementById('leftSidePanel').classList.remove('open');
+});
+
+// --- 일정 로딩 애니메이션 ---
+function showItineraryLoading() {
+  document.getElementById('itinerary-list').innerHTML = '<p>일정을 생성 중입니다...</p>';
+}
+
+// --- 더미 일정 생성 --- => 수정해야함
+function createDummyItinerary(countryId, days) {
+  const spotsKR = [
+    { name: "경복궁", lat: 37.579617, lng: 126.977041, desc: "서울 대표 궁궐" },
+    { name: "남산타워", lat: 37.551169, lng: 126.988227, desc: "서울 전망대" },
+    { name: "북촌한옥마을", lat: 37.582604, lng: 126.983998, desc: "전통 한옥거리" },
+    { name: "명동", lat: 37.563757, lng: 126.982684, desc: "쇼핑 거리" },
+    { name: "인사동", lat: 37.574018, lng: 126.984922, desc: "문화 예술 거리" }
+  ];
+  const spotsJP = [
+    { name: "도쿄타워", lat: 35.658581, lng: 139.745438, desc: "도쿄 랜드마크" },
+    { name: "아사쿠사", lat: 35.714765, lng: 139.796655, desc: "절과 상점가" },
+    { name: "시부야", lat: 35.659487, lng: 139.700044, desc: "번화가" },
+    { name: "우에노공원", lat: 35.715298, lng: 139.774054, desc: "벚꽃 명소" }
+  ];
+  let spots = spotsKR;
+  if (countryId === "JP") spots = spotsJP;
+  let itinerary = [];
+  let idx = 0;
+  for (let d = 1; d <= days; d++) {
+    let daySpots = [];
+    for (let s = 0; s < 2 && idx < spots.length; s++, idx++) {
+      daySpots.push(spots[idx]);
+    }
+    itinerary.push({ day: d, places: daySpots });
+    if (idx >= spots.length) break;
+  }
+  return itinerary;
+}
+
+// --- 일정 리스트 렌더링 ---
+function renderItinerary(itinerary) {
+  const listDiv = document.getElementById('itinerary-list');
+  if (!itinerary || itinerary.length === 0) {
+    listDiv.innerHTML = '<p>일정 정보가 없습니다.</p>';
+    return;
+  }
+  let html = '<h3>추천 일정</h3><ol>';
+  itinerary.forEach(dayPlan => {
+    html += `<li><strong>Day ${dayPlan.day}</strong><ul>`;
+    dayPlan.places.forEach(place => {
+      html += `<li>${place.name} ${place.desc ? `- ${place.desc}` : ''}</li>`;
+    });
+    html += '</ul></li>';
+  });
+  html += '</ol>';
+  listDiv.innerHTML = html;
+}
+
+// --- 일정 지도에 마커 표시 ---
+function renderItineraryMap(itinerary, countryId) {
+  const countryCoordinates = {
+    KR: { lat: 37.5665, lng: 126.9780 },
+    JP: { lat: 35.6895, lng: 139.6917 }
+  };
+  const mapDiv = document.getElementById('left-map-container');
+  mapDiv.innerHTML = '<div id="left-map" style="width:100%;height:220px;"></div>';
+  const center = countryCoordinates[countryId] || { lat: 37.5665, lng: 126.9780 };
+  const map = new google.maps.Map(document.getElementById('left-map'), {
+    center: center,
+    zoom: 12
+  });
+  itinerary.forEach(dayPlan => {
+    dayPlan.places.forEach(place => {
+      new google.maps.Marker({
+        position: { lat: place.lat, lng: place.lng },
+        map: map,
+        title: place.name
+      });
+    });
+  });
+}
