@@ -1,8 +1,8 @@
 // --- 전역 변수 및 데이터 로딩 ---
 let lastSelectedId = null;
-let input_min_budget = 1000;
-let input_max_budget = 1500;
-let input_days = 7;
+let input_min_budget = 1500;
+let input_max_budget = 2000;
+let input_days = 5;
 let lasebudget = 0;
 
 let touristData = {};
@@ -10,7 +10,7 @@ let countryBudgetData = {};
 let capitalData = {};
 const contry_id = [];
 
-const apiKey = 'Open trip api key';
+const apiKey = 'opentrip api';
 
 // 국가 중심 좌표 (필요시 확장)
 const countryCenters = {
@@ -19,6 +19,22 @@ const countryCenters = {
   BZ: { name: "belmopan", lat: 17.2514, lon: -88.7669 },
   // ... 추가
 };
+// 지도 클릭시 수도 좌표
+async function getCoordsByCapital(countryId) {
+  const countryCode = countryId.toUpperCase();
+  const capital = capitalData[countryCode];
+  if (!capital) return null;
+
+  // OpenTripMap geoname API로 수도명 좌표 검색
+  const url = `https://api.opentripmap.com/0.1/en/places/geoname?name=${encodeURIComponent(capital)}&country=${countryCode}&apikey=${apiKey}`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (data && data.lat && data.lon) {
+    return { name: capital, lat: data.lat, lon: data.lon };
+  }
+  return null;
+}
 
 // --- 데이터 로드 ---
 Promise.all([
@@ -85,7 +101,7 @@ document.getElementById('side-close').addEventListener('click', () => close_slid
 
 // --- 날씨 표시 ---
 function Add_Weather(id){
-  const apiKey = "날씨 api key";
+  const apiKey = "날씨 api";
   const countryCode = id.toUpperCase();
   const city = capitalData[countryCode];
 
@@ -120,8 +136,6 @@ function Add_Weather(id){
       console.error('날씨 불러오기 실패:', error);
     });
 }
-
-
 
 
 function remove_weather() {
@@ -217,37 +231,73 @@ function renderTouristGrid(spots) {
 
 // --- OpenTripMap API로 관광지 조회 ---
 async function renderTouristCardsByCountry(countryId) {
-  const info = countryCenters[countryId.toUpperCase()];
+  let info = countryCenters[countryId.toUpperCase()];
   if (!info) {
-    document.getElementById('tourist').innerHTML = '<p>해당 국가의 좌표 정보가 없습니다.</p>';
-    return;
+    // countryCenters에 없으면 수도명으로 좌표 검색
+    info = await getCoordsByCapital(countryId);
+    if (!info) {
+      document.getElementById('tourist').innerHTML = '<p>해당 국가의 좌표 정보가 없습니다.</p>';
+      return;
+    }
+    // (선택) 검색된 좌표를 countryCenters에 저장해서 다음엔 바로 사용
+    countryCenters[countryId.toUpperCase()] = info;
   }
+
+  // 1. 반경 20km 내 관광지 9개 검색
   const radius = 20000;
   const radiusUrl = `https://api.opentripmap.com/0.1/en/places/radius?radius=${radius}&lon=${info.lon}&lat=${info.lat}&limit=9&apikey=${apiKey}`;
-  try {
-    const radiusRes = await fetch(radiusUrl);
-    const radiusData = await radiusRes.json();
-    const features = radiusData.features || [];
-    const details = await Promise.all(features.map(f =>
-      fetch(`https://api.opentripmap.com/0.1/en/places/xid/${f.properties.xid}?apikey=${apiKey}`)
-        .then(res => res.json())
-    ));
-    renderTouristGrid(details);
-  } catch (err) {
-    document.getElementById('tourist').innerHTML = '<p>관광지 정보를 불러오지 못했습니다.</p>';
-  }
+  const radiusRes = await fetch(radiusUrl);
+  const radiusData = await radiusRes.json();
+  const features = radiusData.features || [];
+
+  // 2. 각 관광지 xid로 상세 정보 가져오기 (병렬)
+  const details = await Promise.all(features.map(f =>
+    fetch(`https://api.opentripmap.com/0.1/en/places/xid/${f.properties.xid}?apikey=${apiKey}`)
+      .then(res => res.json())
+  ));
+
+  // 3. 카드 렌더링
+  renderTouristGrid(details);
 }
 
+
+
 // --- 일정 생성 버튼 ---
-document.getElementById('generate-itinerary-btn').addEventListener('click', () => {
+document.getElementById('generate-itinerary-btn').addEventListener('click', async () => {
   openLeftSidePanel();
   showItineraryLoading();
-  setTimeout(() => {
-    const itinerary = createDummyItinerary(lastSelectedId, input_days);
-    renderItinerary(itinerary);
-    renderItineraryMap(itinerary, lastSelectedId);
-  }, 1000);
+
+  // 1) 국가 좌표 얻기 (countryCenters 또는 수도명 API 활용)
+  let info = countryCenters[lastSelectedId];
+  if (!info) {
+    info = await getCoordsByCapital(lastSelectedId);
+    if (!info) {
+      alert('해당 국가의 좌표 정보를 찾을 수 없습니다.');
+      return;
+    }
+    countryCenters[lastSelectedId] = info;
+  }
+
+  // 2) 관광지 9개 가져오기 (OpenTripMap API)
+  const radius = 20000;
+  const radiusUrl = `https://api.opentripmap.com/0.1/en/places/radius?radius=${radius}&lon=${info.lon}&lat=${info.lat}&limit=9&apikey=${apiKey}`;
+  const radiusRes = await fetch(radiusUrl);
+  const radiusData = await radiusRes.json();
+  const features = radiusData.features || [];
+
+  const spots = await Promise.all(features.map(f =>
+    fetch(`https://api.opentripmap.com/0.1/en/places/xid/${f.properties.xid}?apikey=${apiKey}`)
+      .then(res => res.json())
+  ));
+
+  // 3) 일정 생성
+  const itinerary = createItinerary(spots, input_days);
+
+  // 4) 일정 및 지도 렌더링
+  renderItinerary(itinerary);
+  renderItineraryMap(itinerary, lastSelectedId);
 });
+
 
 // --- 왼쪽 패널 열기/닫기 ---
 function openLeftSidePanel() {
@@ -305,13 +355,14 @@ function renderItinerary(itinerary) {
   itinerary.forEach(dayPlan => {
     html += `<li><strong>Day ${dayPlan.day}</strong><ul>`;
     dayPlan.places.forEach(place => {
-      html += `<li>${place.name} ${place.desc ? `- ${place.desc}` : ''}</li>`;
+      html += `<li>${place.name} ${place.wikipedia_extracts ? `- ${place.wikipedia_extracts.text}` : ''}</li>`;
     });
     html += '</ul></li>';
   });
   html += '</ol>';
   listDiv.innerHTML = html;
 }
+
 
 // --- 일정 지도에 마커 표시 ---
 function renderItineraryMap(itinerary, countryId) {
@@ -335,4 +386,20 @@ function renderItineraryMap(itinerary, countryId) {
       });
     });
   });
+}
+// 일정계산
+function createItinerary(spots, days) {
+  let itinerary = [];
+  let idx = 0;
+  let spotsPerDay = Math.ceil(spots.length / days);
+
+  for (let d = 1; d <= days; d++) {
+    let daySpots = [];
+    for (let s = 0; s < spotsPerDay && idx < spots.length; s++, idx++) {
+      daySpots.push(spots[idx]);
+    }
+    itinerary.push({ day: d, places: daySpots });
+    if (idx >= spots.length) break;
+  }
+  return itinerary;
 }
